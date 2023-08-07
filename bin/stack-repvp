@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ((!$#)); then
+  echo "Usage: hackage-repvp <package name>" >&2
+  exit 64
+fi
+
+package=$1
+github=freckle/$package
+bounds=lower
+
+tmp=~/.cache/hackage-repvp
+mkdir -p "$tmp"
+cd "$tmp"
+
+if [[ ! -d "./$package/.git" ]]; then
+  echo "Preparing source repository"
+  git clone "https://github.com/$github"
+fi
+
+hackage-cli pull-cabal --force "$package"
+
+for cabal in "$package"-*.cabal; do
+  version=$(echo "$cabal" | sed "s/^$package-//; s/.cabal$//;")
+
+  printf 'Regenerating cabal file for %s@%s... ' "$package" "$version"
+
+  (
+    cd "$package"
+    git reset --hard --quiet main
+    git checkout --quiet "v$version"
+    stack sdist --pvp-bounds "$bounds" &>/dev/null
+  ) || {
+    echo "failed, skipping"
+    continue
+  }
+
+  echo "success"
+
+  find "$package/.stack-work/dist" \
+    -name "$package-$version.tar.gz" \
+    -exec tar -axf {} "$package-$version/$package.cabal" -O \; \
+    >./"$cabal.new"
+done
+
+for cabal in "$package"-*.cabal; do
+  if [[ -f "$cabal.new" ]]; then
+    if diff --unified --color=always "$cabal"{,.new}; then
+      echo "No updated needed: $cabal"
+    else
+      echo cp -v "$cabal"{.new,}
+      echo hackage-cli push-cabal --incr-rev "$cabal"
+    fi
+  fi
+done

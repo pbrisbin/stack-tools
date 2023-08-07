@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -eou pipefail
+
+usage() {
+  cat <<'EOM'
+Usage: stack install-from -r <resolver> [-b <binary>] <package>[-<version>]
+
+Options:
+  -r            The --resolver to install with
+  -b            The binary name to copy, <package> by default
+
+EOM
+}
+
+resolver=
+package=
+binary=
+
+while getopts r:b:h opt; do
+  case "$opt" in
+    r)
+      resolver=$OPTARG
+      ;;
+    b)
+      binary=$OPTARG
+      ;;
+    h)
+      usage
+      exit 0
+      ;;
+    \?)
+      usage >&2
+      exit 64
+      ;;
+  esac
+done
+
+shift $((OPTIND - 1))
+
+if (($# != 1)); then
+  usage >&2
+  exit 64
+fi
+
+package=$1
+
+if [[ -z "$resolver" ]]; then
+  echo "-r is required" >&2
+  usage >&2
+  exit 64
+fi
+
+if [[ -z "$binary" ]]; then
+  # shellcheck disable=SC2001
+  binary=$(echo "$package" | sed 's/-[0-9.]*$//')
+fi
+
+that_bin=$(stack --resolver "$resolver" path --compiler-tools-bin 2>/dev/null)
+this_bin=$(stack path --compiler-tools-bin 2>/dev/null)
+
+stack --resolver "$resolver" install --copy-compiler-tool "$package"
+cp -v "$that_bin/$binary" "$this_bin/$binary"
+stack exec -- "$binary" --version
